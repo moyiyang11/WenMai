@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-50 text-slate-800;
+  font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+}

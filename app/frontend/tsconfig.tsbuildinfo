@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/distilldetail.tsx","./src/components/linechart.tsx","./src/components/ui.tsx","./src/pages/dashboardpage.tsx","./src/pages/novelspage.tsx","./src/pages/settingspage.tsx","./src/pages/skillspage.tsx","./src/pages/stylespage.tsx"],"version":"5.9.3"}

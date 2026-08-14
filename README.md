@@ -1,0 +1,126 @@
+# AI 小说风格蒸馏与 Skill 导出系统
+
+> 从优秀小说中提取稳定的创作规律，将"看不见的风格"转换成结构化、可比较、可验证、可导出的 AI **Style Skill**。
+> 本系统**不生成小说正文**，只负责：收集 → 分析 → 蒸馏 → 风格提取 → 稳定性分析 → Skill 导出。
+
+本目录以《AI小说风格蒸馏与Skill导出系统_产品说明书.md》第 27 章 **MVP 第一阶段** 为基线实现可运行代码骨架，并已按说明书 **§6–§13 深化单本小说蒸馏**（多维度 + 情绪/节奏/冲突曲线）。
+
+## 已实现的 MVP 闭环（说明书 §27）
+
+```
+小说导入 → 分类/标签 → 单本 AI 蒸馏 → 蒸馏结果保存
+  → 多小说聚类 → 共同特征提取 → 风格稳定性分析
+  → Style Profile → Style Skill 导出（zip 包）
+```
+
+对应界面：**工作台** / **小说库·蒸馏** / **风格中心** / **Skill 导出**。
+
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 前端 | React 18 + TypeScript + Tailwind CSS + Vite |
+| 后端 | Python + FastAPI + SQLAlchemy |
+| 数据库 | SQLite（MVP） |
+| AI | DeepSeek（OpenAI 兼容接口），未配置 key 时自动回退本地 mock |
+
+## 目录结构
+
+```
+app/
+├── backend/
+│   ├── main.py              # FastAPI 入口
+│   ├── models.py            # ORM 模型（Novel/Tag/Distillation/StyleProfile/StyleFeature/Skill）
+│   ├── schemas.py           # Pydantic 请求/响应
+│   ├── core/                # config + database
+│   ├── services/            # llm(DeepSeek) / style(聚类稳定性) / skill(导出) / tags
+│   ├── routers/             # dashboard / novels / styles / skills
+│   └── .env.example
+└── frontend/
+    └── src/
+        ├── api.ts, types.ts
+        ├── App.tsx
+        └── pages/           # Dashboard / Novels / Styles / Skills
+```
+
+## 快速开始
+
+### 方式 A：一键启动（推荐）
+
+首次运行会自动创建 venv、安装前后端依赖，并分别拉起后端(8000)与前端(5173)。
+
+- **Windows**：双击 `app/start.bat`
+- **Git Bash / macOS / Linux**：`cd app && ./start.sh`
+
+启动后打开 http://127.0.0.1:5173 。
+
+### 方式 B：手动启动
+
+#### 1. 后端
+
+```bash
+cd app/backend
+python -m venv .venv
+# Windows(Git Bash):
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+cp .env.example .env          # 可选：填入 DEEPSEEK_API_KEY
+
+.venv/Scripts/python.exe -m uvicorn main:app --reload --port 8000
+```
+
+- 打开 http://127.0.0.1:8000/docs 查看 API。
+- 健康检查 `GET /api/health` 会显示当前用真实模型还是 mock。
+
+> **DeepSeek 接入**：见下方「AI 接入」一节，推荐用网页配置。
+> 留空则蒸馏走本地启发式 mock，可离线跑通整条闭环。
+
+### 2. 前端
+
+```bash
+cd app/frontend
+npm install
+npm run dev      # http://127.0.0.1:5173 （已配置 /api 代理到 8000）
+```
+
+## AI 接入（DeepSeek）与防泄露
+
+有两种方式配置 DeepSeek API Key，**都不会把 Key 写入会被提交到 GitHub 的文件**：
+
+1. **网页配置（推荐）**：启动后进入 **系统设置 · AI** 页面，填入 API Key → 保存 → 可点「测试连接」。
+   - Key 存储在后端本地数据库 `app/backend/data/app.db`，`data/` 已在 `.gitignore` 中排除。
+   - 接口回显一律脱敏（如 `sk-1***abcd`），前端不保存明文；可随时「清除 Key」回退 mock。
+2. **`.env` 文件**：在 `app/backend/.env` 设 `DEEPSEEK_API_KEY=sk-xxx`。该文件同样已 gitignore。
+
+优先级：**网页配置 > .env**。两者都为空时，蒸馏走本地启发式 mock，可离线跑通整条闭环。
+
+> 申请 Key：https://platform.deepseek.com ；`GET /api/health` 会显示当前用真实模型还是 mock。
+
+## 使用流程
+
+1. **小说库·蒸馏**：上传 txt 小说（`素材库/` 下有两本样例），填市场/题材/标签 → 点「蒸馏」。
+2. **风格中心**：勾选 ≥2 本已蒸馏小说 → 填风格名 → 「生成 Style Profile」，查看每个特征的稳定度与分级（核心/重要/辅助/偶然，阈值见 §16）。
+3. **Skill 导出**：选择风格 → 「导出为 Skill」→ 预览各文件 → 下载 zip。
+
+导出的 Skill 包结构（说明书 §17）：
+```
+style-skill/
+├── SKILL.md  ├── style.yaml ├── rules.md   ├── plot.md
+├── character.md ├── rhythm.md ├── dialogue.md ├── language.md └── examples.md
+```
+
+## 与说明书的对应 & 边界
+
+- 已实现（MVP §27）：§5 小说档案、§14 聚类、§15 Style Profile、§16 稳定性分级、§17–19 Skill 导出、§24 首页概览、§26 核心数据模型（MVP 子集）。
+- **已深化的单本蒸馏（§6–§13）**：单本蒸馏结果现覆盖全维度，在「小说库·蒸馏 → 查看」中分页展示：
+  - §6.1 基础信息、§6.2 故事结构、§6.3 人物系统（主角/配角/反派）
+  - §7 人物关系（含关系变化追踪）、§8 剧情时间线
+  - §9 冲突系统（含**冲突曲线**）、§10 悬念伏笔档案
+  - §11 情绪曲线（过程 + 爽点分布）、§12 节奏曲线（对话/信息/爽点/反转四条曲线）
+  - §13 文风系统（语言/描写/叙事/情绪基调）
+  - 曲线以内置轻量 SVG 折线图渲染，无第三方图表库依赖。
+- 仍留待后续（§20/§21/§23/§28/§29）：风格组合、Skill 版本迭代、分析中心（小说vs小说 / 风格vs风格）、章节自动解析、知识库/素材库等。数据模型与蒸馏 JSON 已为其预留扩展点。
+
+## 说明
+
+- 数据库与导出文件在 `app/backend/data/`（首次启动自动建表）。
+- mock 蒸馏是确定性启发式（按标题作种子生成稳定的多维度数据与曲线），仅用于跑通流程与演示；接入 DeepSeek 后由模型按同一 JSON schema 输出真实的结构化蒸馏。

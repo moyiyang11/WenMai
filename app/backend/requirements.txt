@@ -1,0 +1,10 @@
+# 使用 >= 让 pip 为当前 Python 版本挑选带预编译 wheel 的最新版本
+# （Python 3.13/3.14 上请确保 pip 为最新以获取 wheel）
+fastapi>=0.115
+uvicorn[standard]>=0.32
+sqlalchemy>=2.0
+pydantic>=2.9
+pydantic-settings>=2.6
+python-multipart>=0.0.17
+httpx>=0.28
+pyyaml>=6.0
