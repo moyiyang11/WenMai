@@ -29,6 +29,14 @@ export const api = {
     if (!res.ok) throw new Error((await res.json()).detail ?? "上传失败");
     return (await res.json()) as Novel;
   },
+  detectNovel: async (file: File, title = ""): Promise<{ market: string; genre: string; style_tags: string[]; core_theme: string }> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("title", title);
+    const res = await fetch(BASE + "/novels/detect", { method: "POST", body: form });
+    if (!res.ok) throw new Error((await res.json()).detail ?? "识别失败");
+    return res.json();
+  },
   deleteNovel: (id: number) => req<{ ok: boolean }>(`/novels/${id}`, { method: "DELETE" }),
   distill: (id: number) => req<Distillation>(`/novels/${id}/distill`, { method: "POST" }),
   distillation: (id: number) => req<Distillation>(`/novels/${id}/distillation`),

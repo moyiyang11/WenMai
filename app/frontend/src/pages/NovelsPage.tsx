@@ -5,6 +5,7 @@ import { Btn, Card } from "../components/ui";
 import DistillDetail from "../components/DistillDetail";
 
 const MARKETS = ["男频", "女频", "其他"];
+const GENRES = ["玄幻", "仙侠", "都市", "历史", "科幻", "悬疑", "灵异", "末世", "游戏", "无限流", "古言", "现言", "宫斗", "宅斗", "年代", "其他"];
 
 export default function NovelsPage() {
   const [novels, setNovels] = useState<Novel[]>([]);
@@ -18,9 +19,37 @@ export default function NovelsPage() {
   const [market, setMarket] = useState("男频");
   const [genre, setGenre] = useState("");
   const [tags, setTags] = useState("");
+  const [detecting, setDetecting] = useState(false);
+  const [detectHint, setDetectHint] = useState("");
 
   const load = () => api.novels().then(setNovels).catch((e) => setMsg(String(e)));
   useEffect(() => { load(); }, []);
+
+  const onFileChange = (f: File | null) => {
+    setFile(f);
+    setDetectHint("");
+  };
+
+  const autoDetect = async () => {
+    if (!file) { setMsg("请先选择 txt 文件"); return; }
+    setDetecting(true); setDetectHint("AI 识别中…"); setMsg("");
+    try {
+      const r = await api.detectNovel(file, title || file.name.replace(/\.txt$/i, ""));
+      setMarket(r.market || "男频");
+      setGenre(r.genre || "");
+      const newTags = (r.style_tags || []).join(",");
+      setTags(newTags);
+      setDetectHint(
+        `AI 识别完成：${r.market} · ${r.genre} · ${r.core_theme || ""}` +
+        (r.style_tags?.length ? `  标签已预填：${newTags}` : "")
+      );
+    } catch (e) {
+      setDetectHint("识别失败，请手动填写");
+      setMsg(String(e));
+    } finally {
+      setDetecting(false);
+    }
+  };
 
   const upload = async () => {
     if (!file) { setMsg("请先选择 txt 文件"); return; }
@@ -32,7 +61,7 @@ export default function NovelsPage() {
     fd.append("tags", tags);
     try {
       await api.uploadNovel(fd);
-      setFile(null); setTitle(""); setGenre(""); setTags("");
+      setFile(null); setTitle(""); setGenre(""); setTags(""); setDetectHint("");
       setMsg("导入成功");
       load();
     } catch (e) { setMsg(String(e)); }
@@ -65,19 +94,36 @@ export default function NovelsPage() {
 
       <Card title="导入小说（上传 txt）">
         <div className="grid md:grid-cols-2 gap-3 text-sm">
-          <input type="file" accept=".txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="border rounded-lg px-3 py-2" />
+          <div className="md:col-span-2 flex gap-2 items-center">
+            <input type="file" accept=".txt" onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
+              className="border rounded-lg px-3 py-2 flex-1" />
+            <Btn tone="slate" disabled={!file || detecting} onClick={autoDetect}>
+              {detecting ? "识别中…" : "AI 自动识别"}
+            </Btn>
+          </div>
+          {detectHint && (
+            <div className="md:col-span-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              {detectHint}
+            </div>
+          )}
           <input placeholder="标题（留空取文件名）" value={title} onChange={(e) => setTitle(e.target.value)}
             className="border rounded-lg px-3 py-2" />
           <select value={market} onChange={(e) => setMarket(e.target.value)} className="border rounded-lg px-3 py-2">
             {MARKETS.map((m) => <option key={m}>{m}</option>)}
           </select>
-          <input placeholder="题材（如 玄幻/都市）" value={genre} onChange={(e) => setGenre(e.target.value)}
+          <select value={genre} onChange={(e) => setGenre(e.target.value)} className="border rounded-lg px-3 py-2">
+            <option value="">题材（请选择）</option>
+            {GENRES.map((g) => <option key={g}>{g}</option>)}
+          </select>
+          <input placeholder="也可手动填写题材" value={genre} onChange={(e) => setGenre(e.target.value)}
             className="border rounded-lg px-3 py-2" />
           <input placeholder="标签（逗号分隔，如 爽文,升级,热血）" value={tags} onChange={(e) => setTags(e.target.value)}
             className="border rounded-lg px-3 py-2 md:col-span-2" />
         </div>
-        <div className="mt-3"><Btn onClick={upload}>导入</Btn></div>
+        <div className="mt-3 flex items-center gap-3">
+          <Btn onClick={upload}>导入</Btn>
+          <span className="text-xs text-slate-400">蒸馏时采用多段采样（头/中/尾），覆盖完整故事弧</span>
+        </div>
       </Card>
 
       <Card title={`小说列表（${novels.length}）`}>
@@ -92,7 +138,13 @@ export default function NovelsPage() {
             {novels.map((n) => (
               <tr key={n.id} className="border-b border-slate-100">
                 <td className="py-2 font-medium">{n.title}</td>
-                <td>{n.market}</td>
+                <td>
+                  <span className={`px-1.5 py-0.5 rounded text-xs ${
+                    n.market === "男频" ? "bg-blue-100 text-blue-700" :
+                    n.market === "女频" ? "bg-pink-100 text-pink-700" :
+                    "bg-slate-100 text-slate-600"
+                  }`}>{n.market}</span>
+                </td>
                 <td>{n.genre || "—"}</td>
                 <td className="max-w-[180px]">
                   <div className="flex flex-wrap gap-1">
@@ -125,7 +177,8 @@ export default function NovelsPage() {
       </Card>
 
       {detail && (
-        <Card title={`蒸馏结果 · 引擎：${detail.model || "mock"}`} extra={<Btn small tone="slate" onClick={() => setDetail(null)}>关闭</Btn>}>
+        <Card title={`蒸馏结果 · 引擎：${detail.model || "mock"}${(detail.result as any)._sample_desc ? ` · ${(detail.result as any)._sample_desc}` : ""}`}
+          extra={<Btn small tone="slate" onClick={() => setDetail(null)}>关闭</Btn>}>
           <DistillDetail result={detail.result} />
         </Card>
       )}

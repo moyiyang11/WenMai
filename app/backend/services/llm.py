@@ -1,13 +1,4 @@
-"""统一 LLM 客户端 —— 默认对接 DeepSeek（OpenAI 兼容接口）。
-
-说明书要求“统一模型接口，不绑定单一模型”。以 DeepSeek 为默认实现，
-未配置 API key 时回退到确定性 mock，保证离线也能跑通完整闭环。
-
-本模块产出的结构化蒸馏覆盖说明书 §6-§13 全维度：
-basic / narrative / plot / emotion / character / language / style_tags（聚类用，保持兼容）
-+ story_structure(§6.2) / characters(§6.3) / relations(§7) / events(§8 时间线)
-+ conflicts(§9) / foreshadows(§10) / emotion_curve(§11) / rhythm(§12 节奏曲线) / writing(§13)
-"""
+"""LLM service via DeepSeek (OpenAI-compatible); falls back to deterministic mock when no API key is set."""
 from __future__ import annotations
 
 import hashlib
@@ -19,11 +10,50 @@ import httpx
 from core.config import settings
 from services import settings_store
 
-# 蒸馏输出的结构化 schema（供 prompt 约束 & mock 生成对齐）
+# ---------- 多段采样 ----------
+
+def _sample_content(content: str, total_chars: int) -> tuple[str, str]:
+    """Sample head/mid/tail thirds of content; returns (sample_text, description)."""
+    n = len(content)
+    if n <= total_chars:
+        return content, f"全文 {n} 字(未超采样上限)"
+    each = total_chars // 3
+    head = content[:each]
+    mid_start = max(each, n // 2 - each // 2)
+    mid = content[mid_start: mid_start + each]
+    tail_start = max(mid_start + each, n - each)
+    tail = content[tail_start:]
+    sep = "\n\n[……中略……]\n\n"
+    sample = head + sep + mid + sep + tail
+    pct_head = round(each / n * 100, 1)
+    pct_mid = round(mid_start / n * 100, 1)
+    pct_tail = round(tail_start / n * 100, 1)
+    desc = (f"多段采样：前{pct_head}%({each}字)+ "
+            f"中{pct_mid}%({each}字)+ "
+            f"末{pct_tail}%起({len(tail)}字)，全文共 {n} 字")
+    return sample, desc
+
+
+# ---------- 导入预检测 schema ----------
+
+DETECT_SCHEMA_HINT = """
+你是网文编辑，快速判断小说读者市场和题材。阅读给定片段，只输出以下 JSON，不要额外文字：
+{
+  "market": "男频|女频|其他",
+  "genre": "题材(如 玄幻/仙侠/都市/历史/科幻/悬疑/灵异/末世/古言/现言/宫斗/宅斗/年代/无限流/游戏)",
+  "style_tags": ["爽文","升级","热血"],
+  "core_theme": "一句话核心主题"
+}
+判断依据：
+- 男频：升级/修炼/打怪/系统/争霸/商战/热血/无限流等男性向叙事
+- 女频：穿越/宫斗/宅斗/甜宠/古言/现言/强强/CP向等女性向叙事
+只输出 JSON，不要额外文字。
+"""
+
 DISTILL_SCHEMA_HINT = """
-你是一名网文风格逆向分析专家。请阅读给定的小说片段，抽象出可迁移的“风格规律”，
-不要复述剧情、不要照抄原文。严格输出如下 JSON（值使用中文；枚举尽量落在提示区间；
-曲线类字段输出 0-100 的整数数组，长度 8-12，代表故事从开端到结尾的走势）：
+你是一名网文风格逆向分析专家。请阅读给定的小说片段，抽象出可迁移的"风格规律"，
+不要复述剧情、不要照抄原文。严格输出如下 JSON(值使用中文；枚举尽量落在提示区间；
+曲线类字段输出 0-100 的整数数组，长度 8-12，代表故事从开端到结尾的走势)：
 
 {
   "basic": {
@@ -108,7 +138,7 @@ DISTILL_SCHEMA_HINT = """
 
 
 def _extract_json(text: str) -> dict:
-    """从模型返回里抽出第一个 JSON 对象。"""
+    """Strip markdown fences and parse JSON from LLM response text."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
@@ -123,7 +153,7 @@ def _extract_json(text: str) -> dict:
 
 
 def _seeded_curve(seed: int, n: int, base: int, amp: int, rising: bool = True) -> list[int]:
-    """用线性同余生成确定性伪随机曲线（0-100），可选整体上升趋势。"""
+    """Generate a seeded pseudo-random curve of integers in 0-100."""
     vals = []
     x = seed % 2147483647 or 1
     for i in range(n):
@@ -135,12 +165,13 @@ def _seeded_curve(seed: int, n: int, base: int, amp: int, rising: bool = True) -
 
 
 def _mock_distill(title: str, content: str) -> dict:
-    """无 API key 时的确定性启发式蒸馏，覆盖全维度用于跑通闭环。"""
-    sample = content[: settings.distill_sample_chars] or title
+    """Return deterministic mock distillation result when no API key is available."""
+    sample, sample_desc = _sample_content(content, settings.distill_sample_chars)
+    sample = sample or title
     seed = int(hashlib.md5(title.encode("utf-8")).hexdigest()[:8], 16)
 
     # 语言特征启发式
-    dialogue_ratio = sample.count("“") / max(len(sample) / 100, 1)
+    dialogue_ratio = sample.count('“') / max(len(sample) / 100, 1)
     marks = sample.count("。") + sample.count("！") + sample.count("？")
     avg_sent = len(sample) / max(marks, 1)
     sent_len = "short" if avg_sent < 18 else "short_medium" if avg_sent < 30 else "medium"
@@ -208,7 +239,7 @@ def _mock_distill(title: str, content: str) -> dict:
                 "conflict": "与主角争夺资源与命运主导权", "ending": "被主角超越并击败",
             },
         },
-        # ---- §7 人物关系（含变化追踪）----
+        # ---- §7 人物关系(含变化追踪)----
         "relations": [
             {"from": "主角", "to": "引路人", "type": "师徒", "changes": ["陌生", "师徒", "并肩"]},
             {"from": "主角", "to": "反派", "type": "敌对", "changes": ["对立", "冲突", "决裂", "决战"]},
@@ -271,19 +302,63 @@ def _mock_distill(title: str, content: str) -> dict:
             "tone": {"seriousness": "中", "humor": "中", "oppression": "中", "intensity": "高", "literariness": "中", "popularity": "高"},
         },
         "_engine": "mock",
+        "_sample_desc": sample_desc,
     }
 
 
+def _mock_detect(title: str, content: str) -> dict:
+    """mock detect: no API key fallback for offline demo."""
+    sample = content[:6000] or title
+    is_female = any(k in sample for k in ["穿越", "宫斗", "宅斗", "甜宠", "古言", "女主", "闺蜜", "嫁", "夫君"])
+    is_xuanhuan = any(k in sample for k in ["修仙", "武道", "玄幻", "灵气", "修炼", "丹药"])
+    tag_hits = [t for t in ["爽文", "升级", "热血", "悬疑", "智斗", "甜宠", "逆袭", "快节奏"] if t in sample]
+    return {
+        "market": "女频" if is_female else "男频",
+        "genre": "古言" if is_female and not is_xuanhuan else ("玄幻" if is_xuanhuan else "都市"),
+        "style_tags": tag_hits[:4] or (["甜宠", "古言"] if is_female else ["爽文", "升级"]),
+        "core_theme": "穿越逆袭成长" if is_female else "成长与逆袭",
+        "_engine": "mock",
+    }
+
+
+def detect_novel(title: str, content: str) -> dict:
+    """Detect novel market/genre from first 6000 chars; falls back to mock when no API key."""
+    api_key = settings_store.get_api_key()
+    if not api_key.strip():
+        return _mock_detect(title, content)
+
+    model = settings_store.get_model()
+    base_url = settings_store.get_base_url()
+    sample = content[:6000]
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": DETECT_SCHEMA_HINT},
+            {"role": "user", "content": f"小说名：{title}\n\n片段：\n{sample}"},
+        ],
+        "temperature": 0.1,
+        "stream": False,
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
+    with httpx.Client(timeout=60) as client:
+        resp = client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"]
+    result = _extract_json(text)
+    result["_engine"] = model
+    return result
+
+
 def distill_novel(title: str, content: str) -> dict:
-    """蒸馏单本小说，返回结构化 dict。"""
+    """Distill novel into style profile dict; uses multi-segment sampling; falls back to mock."""
     api_key = settings_store.get_api_key()
     if not api_key.strip():
         return _mock_distill(title, content)
 
     model = settings_store.get_model()
     base_url = settings_store.get_base_url()
-    sample = content[: settings.distill_sample_chars]
-    user_prompt = f"小说名：{title}\n\n小说片段：\n{sample}"
+    sample, sample_desc = _sample_content(content, settings.distill_sample_chars)
+    user_prompt = f"小说名：{title}\n采样说明：{sample_desc}\n\n小说片段：\n{sample}"
     payload = {
         "model": model,
         "messages": [
@@ -304,4 +379,6 @@ def distill_novel(title: str, content: str) -> dict:
         text = resp.json()["choices"][0]["message"]["content"]
     result = _extract_json(text)
     result["_engine"] = model
+    result["_sample_desc"] = sample_desc
     return result
+

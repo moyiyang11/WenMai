@@ -33,6 +33,22 @@ def create_novel(payload: schemas.NovelCreate, db: Session = Depends(get_db)):
     return novel
 
 
+@router.post("/detect")
+async def detect_novel(
+    file: UploadFile = File(...),
+    title: str = Form(""),
+):
+    """上传 txt 快速预检测市场/题材/标签，用于导入表单预填。仅分析前 6000 字，响应较快。"""
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        content = raw.decode("gbk", errors="ignore")
+    name = title or (file.filename or "").rsplit(".", 1)[0]
+    result = llm.detect_novel(name, content)
+    return result
+
+
 @router.post("/upload", response_model=schemas.NovelOut)
 async def upload_novel(
     file: UploadFile = File(...),
