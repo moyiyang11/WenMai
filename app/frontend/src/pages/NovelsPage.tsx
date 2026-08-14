@@ -179,7 +179,10 @@ export default function NovelsPage() {
       {detail && (
         <Card title={`蒸馏结果 · 引擎：${detail.model || "mock"}${(detail.result as any)._sample_desc ? ` · ${(detail.result as any)._sample_desc}` : ""}`}
           extra={<Btn small tone="slate" onClick={() => setDetail(null)}>关闭</Btn>}>
-          <DistillDetail result={detail.result} />
+          <DistillDetail
+            result={detail.result}
+            title={novels.find((n) => n.id === detail.novel_id)?.title}
+          />
         </Card>
       )}
     </div>

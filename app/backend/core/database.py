@@ -1,7 +1,7 @@
 """数据库引擎与会话。MVP 使用 SQLite。"""
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from core.config import settings
@@ -9,6 +9,17 @@ from core.config import settings
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 
 engine = create_engine(settings.database_url, connect_args=connect_args, future=True)
+
+
+# SQLite 默认不开启外键约束，导致 CASCADE DELETE 失效。每次拿到连接时强制开启。
+if settings.database_url.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_fk(dbapi_conn, _):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 
 

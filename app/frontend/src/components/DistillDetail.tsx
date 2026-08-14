@@ -36,7 +36,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default function DistillDetail({ result }: { result: Record<string, any> }) {
+export default function DistillDetail({ result, title }: { result: Record<string, any>; title?: string }) {
   const [tab, setTab] = useState("basic");
   const r = result || {};
   const ss = r.story_structure || {};
@@ -61,6 +61,7 @@ export default function DistillDetail({ result }: { result: Record<string, any> 
       {tab === "basic" && (
         <div className="grid md:grid-cols-2 gap-4">
           <Section title="基础信息（§6.1）">
+            {title && <Field label="小说名" value={title} />}
             <Field label="市场" value={r.basic?.market} />
             <Field label="题材" value={r.basic?.genre} />
             <Field label="核心主题" value={r.basic?.core_theme} />

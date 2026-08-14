@@ -90,7 +90,7 @@ export default function StylesPage() {
         </div>
       </Card>
 
-      <Card title="② 风格组合（§20）：把多个风格重新计算共同规则 / 冲突规则 / 优先级">
+      <Card title="② 风格组合：把多个风格重新计算共同规则 / 冲突规则 / 优先级">
         {profiles.length < 2 && (
           <div className="text-sm text-slate-400">至少需要 2 个已有风格才能组合，请先在上方生成风格。</div>
         )}
