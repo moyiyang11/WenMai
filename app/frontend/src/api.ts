@@ -40,6 +40,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, novel_ids, description }),
     }),
+  combineStyles: (name: string, profile_ids: number[], description = "") =>
+    req<StyleProfile>("/styles/combine", {
+      method: "POST",
+      body: JSON.stringify({ name, profile_ids, description }),
+    }),
   deleteStyle: (id: number) => req<{ ok: boolean }>(`/styles/${id}`, { method: "DELETE" }),
 
   skills: () => req<Skill[]>("/skills"),

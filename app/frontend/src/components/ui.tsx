@@ -45,6 +45,22 @@ export function LevelBadge({ level }: { level: string }) {
   );
 }
 
+const originColor: Record<string, string> = {
+  共同: "bg-emerald-100 text-emerald-700",
+  独有: "bg-sky-100 text-sky-700",
+  "冲突-采纳": "bg-amber-100 text-amber-700",
+  "冲突-弃用": "bg-rose-100 text-rose-500 line-through",
+};
+
+export function OriginBadge({ origin }: { origin?: string }) {
+  if (!origin) return null;
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] ${originColor[origin] ?? "bg-slate-100 text-slate-500"}`}>
+      {origin}
+    </span>
+  );
+}
+
 export function Btn({
   children,
   onClick,

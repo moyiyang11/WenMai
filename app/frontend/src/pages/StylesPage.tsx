@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Novel, StyleProfile } from "../types";
-import { Bar, Btn, Card, LevelBadge } from "../components/ui";
+import { Bar, Btn, Card, LevelBadge, OriginBadge } from "../components/ui";
 
 export default function StylesPage() {
   const [novels, setNovels] = useState<Novel[]>([]);
@@ -10,6 +10,9 @@ export default function StylesPage() {
   const [name, setName] = useState("");
   const [msg, setMsg] = useState("");
   const [active, setActive] = useState<StyleProfile | null>(null);
+  // 风格组合（§20）
+  const [comboSel, setComboSel] = useState<Set<number>>(new Set());
+  const [comboName, setComboName] = useState("");
 
   const load = () => {
     api.novels().then((n) => setNovels(n.filter((x) => x.distill_status === "完成")));
@@ -23,6 +26,12 @@ export default function StylesPage() {
     setSelected(s);
   };
 
+  const toggleCombo = (id: number) => {
+    const s = new Set(comboSel);
+    s.has(id) ? s.delete(id) : s.add(id);
+    setComboSel(s);
+  };
+
   const cluster = async () => {
     if (selected.size < 2) { setMsg("请至少勾选 2 本已蒸馏小说"); return; }
     if (!name.trim()) { setMsg("请填写风格名称"); return; }
@@ -30,6 +39,19 @@ export default function StylesPage() {
       const p = await api.cluster(name.trim(), [...selected]);
       setMsg(`已生成风格「${p.name}」，综合稳定性 ${p.stability}%`);
       setName(""); setSelected(new Set());
+      load();
+      setActive(p);
+    } catch (e) { setMsg(String(e)); }
+  };
+
+  const combine = async () => {
+    if (comboSel.size < 2) { setMsg("请至少勾选 2 个已有风格进行组合"); return; }
+    if (!comboName.trim()) { setMsg("请填写组合风格名称"); return; }
+    try {
+      const p = await api.combineStyles(comboName.trim(), [...comboSel]);
+      const conflicts = p.features.filter((f) => f.origin === "冲突-采纳").length;
+      setMsg(`已组合生成「${p.name}」，综合稳定性 ${p.stability}%，${conflicts} 处规则冲突已按优先级取舍`);
+      setComboName(""); setComboSel(new Set());
       load();
       setActive(p);
     } catch (e) { setMsg(String(e)); }
@@ -45,7 +67,7 @@ export default function StylesPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">风格中心</h1>
-      <p className="text-sm text-slate-500 -mt-3">多小说聚类 → 共同特征提取 → 稳定性分析 → Style Profile</p>
+      <p className="text-sm text-slate-500 -mt-3">多小说聚类 → 共同特征提取 → 稳定性分析 → Style Profile → 风格组合</p>
       {msg && <div className="text-sm text-indigo-600">{msg}</div>}
 
       <Card title="① 选择已蒸馏小说进行聚类">
@@ -68,8 +90,34 @@ export default function StylesPage() {
         </div>
       </Card>
 
+      <Card title="② 风格组合（§20）：把多个风格重新计算共同规则 / 冲突规则 / 优先级">
+        {profiles.length < 2 && (
+          <div className="text-sm text-slate-400">至少需要 2 个已有风格才能组合，请先在上方生成风格。</div>
+        )}
+        {profiles.length >= 2 && (
+          <>
+            <div className="grid md:grid-cols-3 gap-2">
+              {profiles.map((p) => (
+                <label key={p.id} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer ${
+                  comboSel.has(p.id) ? "border-emerald-500 bg-emerald-50" : "border-slate-200"
+                }`}>
+                  <input type="checkbox" checked={comboSel.has(p.id)} onChange={() => toggleCombo(p.id)} />
+                  <span className="truncate">{p.name}</span>
+                  <span className="text-slate-400 text-xs ml-auto">{p.stability}%</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <input placeholder="组合风格名称，如 都市商战智斗悬疑风" value={comboName}
+                onChange={(e) => setComboName(e.target.value)} className="border rounded-lg px-3 py-2 text-sm flex-1" />
+              <Btn tone="emerald" onClick={combine}>生成组合风格（已选 {comboSel.size}）</Btn>
+            </div>
+          </>
+        )}
+      </Card>
+
       <div className="grid md:grid-cols-2 gap-5">
-        <Card title={`② 风格列表（${profiles.length}）`}>
+        <Card title={`③ 风格列表（${profiles.length}）`}>
           <ul className="space-y-2">
             {profiles.map((p) => (
               <li key={p.id}
@@ -88,19 +136,25 @@ export default function StylesPage() {
           </ul>
         </Card>
 
-        <Card title="③ 风格详情 / 稳定性">
+        <Card title="④ 风格详情 / 稳定性">
           {!active && <div className="text-sm text-slate-400">点击左侧风格查看详情</div>}
           {active && (
             <div className="space-y-4">
               <div>
                 <div className="font-semibold">{active.name}</div>
                 <div className="text-xs text-slate-500">综合稳定性 {active.stability}%</div>
+                {active.description && <div className="text-xs text-slate-400 mt-1">{active.description}</div>}
               </div>
               <div className="space-y-1.5 max-h-72 overflow-auto pr-1">
-                {[...active.features].sort((a, b) => b.stability - a.stability).map((f) => (
-                  <div key={f.id} className="text-xs">
+                {[...active.features]
+                  .sort((a, b) => (a.origin === "冲突-弃用" ? 1 : 0) - (b.origin === "冲突-弃用" ? 1 : 0) || b.stability - a.stability)
+                  .map((f) => (
+                  <div key={f.id} className={`text-xs ${f.origin === "冲突-弃用" ? "opacity-60" : ""}`}>
                     <div className="flex justify-between mb-0.5">
-                      <span className="text-slate-600">{f.dimension} · <b>{f.feature}</b></span>
+                      <span className="text-slate-600 flex items-center gap-1">
+                        <OriginBadge origin={f.origin} />
+                        {f.dimension} · <b>{f.feature}</b>
+                      </span>
                       <span className="flex items-center gap-1"><LevelBadge level={f.level} />{f.stability}%</span>
                     </div>
                     <Bar value={f.stability} />

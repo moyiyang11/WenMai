@@ -34,6 +34,7 @@ export interface StyleFeature {
   feature: string;
   stability: number;
   level: string;
+  origin?: string; // 组合来源：共同/独有/冲突-采纳/冲突-弃用（普通聚类为空）
 }
 
 export interface StyleProfile {

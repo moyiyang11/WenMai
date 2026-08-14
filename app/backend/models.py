@@ -139,6 +139,8 @@ class StyleFeature(Base):
     stability: Mapped[float] = mapped_column(Float, default=0.0)    # 稳定度 0-100
     # 核心特征/重要特征/辅助特征/偶然特征
     level: Mapped[str] = mapped_column(String(16), default="偶然特征")
+    # 组合来源标记（§20 风格组合）：普通聚类为空；组合时为 共同/独有/冲突-采纳/冲突-弃用
+    origin: Mapped[str] = mapped_column(String(16), default="")
 
     profile: Mapped[StyleProfile] = relationship(back_populates="features")
 

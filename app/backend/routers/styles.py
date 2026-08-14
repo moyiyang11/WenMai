@@ -75,3 +75,66 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)):
     db.delete(profile)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/combine", response_model=schemas.StyleProfileOut)
+def combine(payload: schemas.CombineRequest, db: Session = Depends(get_db)):
+    """风格组合（说明书 §20）：把多个已有 Style Profile 组合成新风格。
+
+    重新计算共同规则 / 冲突规则 / 优先级，生成新的 Style Profile。
+    """
+    import yaml
+
+    ids = list(dict.fromkeys(payload.profile_ids))  # 去重保序
+    if len(ids) < 2:
+        raise HTTPException(400, "至少选择 2 个风格进行组合")
+
+    profiles = db.query(StyleProfile).filter(StyleProfile.id.in_(ids)).all()
+    if len(profiles) < 2:
+        raise HTTPException(400, "有效风格不足 2 个")
+
+    sources = [
+        {
+            "name": p.name,
+            "weight": len(p.novels) or 1,
+            "features": [
+                {"dimension": f.dimension, "feature": f.feature, "stability": f.stability, "level": f.level}
+                for f in p.features
+            ],
+            "profile": yaml.safe_load(p.profile_yaml) or {},
+        }
+        for p in profiles
+    ]
+
+    result = style.combine(sources)
+    profile_yaml = style.to_yaml(payload.name, result["profile"])
+
+    source_names = "、".join(p.name for p in profiles)
+    desc = payload.description or f"组合自：{source_names}"
+
+    new_profile = StyleProfile(
+        name=payload.name,
+        description=desc,
+        stability=result["stability"],
+        profile_yaml=profile_yaml,
+    )
+    # 来源小说 = 各源风格来源小说的并集（去重）
+    novel_union: dict[int, Novel] = {}
+    for p in profiles:
+        for n in p.novels:
+            novel_union[n.id] = n
+    new_profile.novels = list(novel_union.values())
+    new_profile.features = [
+        StyleFeature(
+            dimension=f["dimension"],
+            feature=f["feature"],
+            stability=f["stability"],
+            level=f["level"],
+            origin=f.get("origin", ""),
+        )
+        for f in result["features"]
+    ]
+    db.add(new_profile)
+    db.commit()
+    db.refresh(new_profile)
+    return new_profile

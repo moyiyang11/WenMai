@@ -65,6 +65,13 @@ class ClusterRequest(BaseModel):
     description: str = ""
 
 
+class CombineRequest(BaseModel):
+    """风格组合（说明书 §20）：把多个已有 Style Profile 组合成新风格。"""
+    name: str
+    profile_ids: list[int]
+    description: str = ""
+
+
 class StyleFeatureOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -72,6 +79,7 @@ class StyleFeatureOut(BaseModel):
     feature: str
     stability: float
     level: str
+    origin: str = ""
 
 
 class StyleProfileOut(BaseModel):
