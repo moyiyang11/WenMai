@@ -10,27 +10,53 @@ import httpx
 from core.config import settings
 from services import settings_store
 
-# ---------- 多段采样 ----------
+# ---------- 自适应多段采样 ----------
 
 def _sample_content(content: str, total_chars: int) -> tuple[str, str]:
-    """Sample head/mid/tail thirds of content; returns (sample_text, description)."""
+    """Adaptive equidistant multi-segment sampling across full novel.
+
+    Segment count scales with novel length so that longer novels get more
+    evenly-distributed coverage points rather than just head/mid/tail.
+    """
     n = len(content)
     if n <= total_chars:
         return content, f"全文 {n} 字(未超采样上限)"
-    each = total_chars // 3
-    head = content[:each]
-    mid_start = max(each, n // 2 - each // 2)
-    mid = content[mid_start: mid_start + each]
-    tail_start = max(mid_start + each, n - each)
-    tail = content[tail_start:]
+
+    # Adaptive segment count: more segments for longer novels
+    if n <= 100_000:
+        n_segs = 5
+    elif n <= 500_000:
+        n_segs = 8
+    elif n <= 2_000_000:
+        n_segs = 12
+    else:
+        n_segs = 16
+
+    each = total_chars // n_segs
+    if each < 2000:  # floor: at least 2K per segment
+        each = 2000
+        n_segs = max(3, total_chars // each)
+
+    segments = []
+    seg_descs = []
+    for i in range(n_segs):
+        # Evenly distribute sampling start points from 0% to (100% - one segment)
+        if n_segs == 1:
+            start = 0
+        else:
+            start = int(i / (n_segs - 1) * (n - each))
+        start = max(0, min(start, n - each))
+        segments.append(content[start: start + each])
+        seg_descs.append(f"{round(start / n * 100, 1)}%")
+
     sep = "\n\n[……中略……]\n\n"
-    sample = head + sep + mid + sep + tail
-    pct_head = round(each / n * 100, 1)
-    pct_mid = round(mid_start / n * 100, 1)
-    pct_tail = round(tail_start / n * 100, 1)
-    desc = (f"多段采样：前{pct_head}%({each}字)+ "
-            f"中{pct_mid}%({each}字)+ "
-            f"末{pct_tail}%起({len(tail)}字)，全文共 {n} 字")
+    sample = sep.join(segments)
+    sampled = each * n_segs
+    coverage = round(sampled / n * 100, 1)
+    desc = (
+        f"{n_segs}段均匀采样（各 {each} 字，覆盖位置：{seg_descs[0]}…{seg_descs[-1]}），"
+        f"共采样 {sampled} 字 / 全文 {n} 字（采样率 {coverage}%）"
+    )
     return sample, desc
 
 
@@ -358,7 +384,13 @@ def distill_novel(title: str, content: str) -> dict:
     model = settings_store.get_model()
     base_url = settings_store.get_base_url()
     sample, sample_desc = _sample_content(content, settings.distill_sample_chars)
-    user_prompt = f"小说名：{title}\n采样说明：{sample_desc}\n\n小说片段：\n{sample}"
+    user_prompt = (
+        f"小说名：{title}\n"
+        f"采样说明：{sample_desc}\n"
+        "（以下片段来自全书不同位置，由分隔符 [……中略……] 区隔，请综合所有片段归纳可迁移的风格规律，"
+        "不要只依赖开头，也不要复述具体剧情。）\n\n"
+        f"小说片段：\n{sample}"
+    )
     payload = {
         "model": model,
         "messages": [

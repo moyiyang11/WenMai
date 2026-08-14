@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     # 数据库
     database_url: str = f"sqlite:///{(BASE_DIR / 'data' / 'app.db').as_posix()}"
 
-    # 蒸馏采样
-    distill_sample_chars: int = 24000
+    # 蒸馏采样（单次 API 调用最大字符数；中文约 1 char≈1 token，留余量给 schema/system prompt）
+    distill_sample_chars: int = 80000
 
     @property
     def llm_enabled(self) -> bool:
