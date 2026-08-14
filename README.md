@@ -124,3 +124,27 @@ style-skill/
 
 - 数据库与导出文件在 `app/backend/data/`（首次启动自动建表）。
 - mock 蒸馏是确定性启发式（按标题作种子生成稳定的多维度数据与曲线），仅用于跑通流程与演示；接入 DeepSeek 后由模型按同一 JSON schema 输出真实的结构化蒸馏。
+
+## 更新记录
+
+### 2026-08-14 · 端到端验证 & 上传安全核查
+
+本次不新增功能，对现有实现做了完整的可运行性验证，并完成 GitHub 上传前的敏感信息核查。结论：**系统可运行、可交付，可安全上传。**
+
+**后端验证（FastAPI + SQLite）**
+
+- 模块导入正常，全部 API 端点齐备：小说管理/上传/蒸馏、风格聚类、Skill 导出/预览/下载、Dashboard、设置。
+- 真实 HTTP 闭环测试全部通过：健康检查 → 2 本小说（均已蒸馏完成）→ 1 个风格 Profile（稳定性 82.6，23 个特征）→ 导出 Skill → 预览 9 个文件 → 下载 3.7 KB zip 包。
+- 导出的 Skill 包结构符合 §17（`SKILL.md / style.yaml / rules.md / plot.md / character.md / rhythm.md / dialogue.md / language.md / examples.md`），内容遵循 §19 原则（不复制原文、不模仿作者、不生成正文）。
+- 验证中产生的临时 Skill 记录已清理，数据库恢复干净状态。
+
+**前端验证（React + TS + Tailwind）**
+
+- `tsc --noEmit` 类型检查零错误。
+- `npm run build` 生产构建成功（43 模块，gzip 63 KB）；`dist/` 已被 gitignore，不入库。
+
+**上传安全核查**
+
+- git 仅跟踪 45 个源码/配置文件；`.venv/`、`node_modules/`、`app/backend/data/`（含 `app.db`）、`.env`、素材库 txt 均已被正确忽略。
+- 全量扫描跟踪文件，未发现真实 API Key、token、密码、邮箱、手机号、真实姓名或本机绝对路径。
+- API Key 仅落库于已忽略的 `data/app.db`，接口回显一律脱敏，符合设计预期。
