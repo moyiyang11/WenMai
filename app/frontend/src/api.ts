@@ -40,6 +40,16 @@ export const api = {
   deleteNovel: (id: number) => req<{ ok: boolean }>(`/novels/${id}`, { method: "DELETE" }),
   distill: (id: number) => req<Distillation>(`/novels/${id}/distill`, { method: "POST" }),
   distillation: (id: number) => req<Distillation>(`/novels/${id}/distillation`),
+  batchUploadNovels: async (files: File[], market: string, genre = "", tags = "") => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f);
+    form.append("market", market);
+    form.append("genre", genre);
+    form.append("tags", tags);
+    const res = await fetch(BASE + "/novels/batch-upload", { method: "POST", body: form });
+    if (!res.ok) throw new Error((await res.json()).detail ?? "批量上传失败");
+    return res.json() as Promise<{ results: { title: string; success: boolean; id?: number; error?: string }[]; success_count: number }>;
+  },
 
   styles: () => req<StyleProfile[]>("/styles"),
   style: (id: number) => req<StyleProfile>(`/styles/${id}`),
@@ -54,6 +64,11 @@ export const api = {
       body: JSON.stringify({ name, profile_ids, description }),
     }),
   deleteStyle: (id: number) => req<{ ok: boolean }>(`/styles/${id}`, { method: "DELETE" }),
+  suggestStyleName: (novel_ids: number[]) =>
+    req<{ suggestions: string[] }>("/styles/suggest-name", {
+      method: "POST",
+      body: JSON.stringify({ novel_ids }),
+    }),
 
   skills: () => req<Skill[]>("/skills"),
   exportSkill: (profileId: number, version = "v1.0", name = "") =>

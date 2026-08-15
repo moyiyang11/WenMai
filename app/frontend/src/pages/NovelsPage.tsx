@@ -22,6 +22,18 @@ export default function NovelsPage() {
   const [detecting, setDetecting] = useState(false);
   const [detectHint, setDetectHint] = useState("");
 
+  // 批量导入
+  const [batchItems, setBatchItems] = useState<{
+    file: File; title: string; market: string; genre: string; tags: string;
+    status: "pending" | "detecting" | "detected" | "importing" | "done" | "error"; hint: string;
+  }[]>([]);
+  const [batchDetecting, setBatchDetecting] = useState(false);
+  const [batchImporting, setBatchImporting] = useState(false);
+
+  // 批量蒸馏
+  const [batchDistilling, setBatchDistilling] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
+
   const load = () => api.novels().then(setNovels).catch((e) => setMsg(String(e)));
   useEffect(() => { load(); }, []);
 
@@ -87,6 +99,74 @@ export default function NovelsPage() {
     await api.deleteNovel(id); load();
   };
 
+  const batchDetectAll = async () => {
+    if (!batchItems.length) return;
+    setBatchDetecting(true); setMsg("");
+    for (let i = 0; i < batchItems.length; i++) {
+      const item = batchItems[i];
+      if (item.status === "done") continue;
+      setBatchItems((prev) => prev.map((it, idx) => idx === i ? { ...it, status: "detecting", hint: "识别中…" } : it));
+      try {
+        const r = await api.detectNovel(item.file, item.title);
+        setBatchItems((prev) => prev.map((it, idx) => idx === i ? {
+          ...it,
+          market: r.market || it.market,
+          genre: r.genre || it.genre,
+          tags: (r.style_tags || []).join(","),
+          status: "detected",
+          hint: r.core_theme || "识别完成",
+        } : it));
+      } catch {
+        setBatchItems((prev) => prev.map((it, idx) => idx === i ? { ...it, status: "error", hint: "识别失败" } : it));
+      }
+    }
+    setBatchDetecting(false);
+  };
+
+  const batchImportAll = async () => {
+    if (!batchItems.length) return;
+    setBatchImporting(true); setMsg("");
+    let done = 0;
+    for (let i = 0; i < batchItems.length; i++) {
+      const item = batchItems[i];
+      if (item.status === "done") continue;
+      setBatchItems((prev) => prev.map((it, idx) => idx === i ? { ...it, status: "importing", hint: "导入中…" } : it));
+      const fd = new FormData();
+      fd.append("file", item.file);
+      fd.append("title", item.title);
+      fd.append("market", item.market);
+      fd.append("genre", item.genre);
+      fd.append("tags", item.tags);
+      try {
+        await api.uploadNovel(fd);
+        setBatchItems((prev) => prev.map((it, idx) => idx === i ? { ...it, status: "done", hint: "已导入" } : it));
+        done++;
+      } catch (e) {
+        setBatchItems((prev) => prev.map((it, idx) => idx === i ? { ...it, status: "error", hint: String(e) } : it));
+      }
+    }
+    setBatchImporting(false);
+    setMsg(`批量导入完成：成功 ${done} / ${batchItems.length} 本`);
+    load();
+  };
+
+  const batchDistill = async () => {
+    const undistilled = novels.filter((n) => n.distill_status !== "完成");
+    if (!undistilled.length) return;
+    setBatchDistilling(true);
+    setBatchProgress({ done: 0, total: undistilled.length });
+    setMsg("");
+    let done = 0;
+    for (const n of undistilled) {
+      try { await api.distill(n.id); } catch { /* 单本失败继续 */ }
+      done++;
+      setBatchProgress({ done, total: undistilled.length });
+      load();
+    }
+    setBatchDistilling(false);
+    setMsg(`批量蒸馏完成（共 ${done} 本）`);
+  };
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">小说库 / 蒸馏中心</h1>
@@ -126,7 +206,94 @@ export default function NovelsPage() {
         </div>
       </Card>
 
-      <Card title={`小说列表（${novels.length}）`}>
+      <Card title="批量导入多本小说">
+        <div className="flex flex-col gap-3 text-sm">
+          {/* 文件选择 */}
+          <div className="flex gap-2 items-center">
+            <input type="file" multiple accept=".txt"
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                setBatchItems(files.map((f) => ({
+                  file: f,
+                  title: f.name.replace(/\.txt$/i, ""),
+                  market: "男频", genre: "", tags: "",
+                  status: "pending" as const, hint: "",
+                })));
+              }}
+              className="border rounded-lg px-3 py-2 flex-1" />
+            <Btn tone="slate"
+              disabled={!batchItems.length || batchDetecting || batchImporting}
+              onClick={batchDetectAll}>
+              {batchDetecting ? "识别中…" : "AI 批量识别"}
+            </Btn>
+            <Btn
+              disabled={!batchItems.length || batchDetecting || batchImporting}
+              onClick={batchImportAll}>
+              {batchImporting ? "导入中…" : `批量导入（${batchItems.length} 本）`}
+            </Btn>
+          </div>
+
+          {/* 文件列表 */}
+          {batchItems.length > 0 && (
+            <div className="overflow-auto rounded-lg border border-slate-200">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="text-left px-3 py-2">文件名</th>
+                    <th className="text-left px-3 py-2 w-16">市场</th>
+                    <th className="text-left px-3 py-2 w-20">题材</th>
+                    <th className="text-left px-3 py-2">标签</th>
+                    <th className="text-left px-3 py-2 w-24">状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batchItems.map((item, i) => (
+                    <tr key={i} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-medium max-w-[160px] truncate" title={item.title}>{item.title}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${
+                          item.market === "男频" ? "bg-blue-100 text-blue-700" :
+                          item.market === "女频" ? "bg-pink-100 text-pink-700" :
+                          "bg-slate-100 text-slate-600"
+                        }`}>{item.market}</span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">{item.genre || "—"}</td>
+                      <td className="px-3 py-2 text-slate-500 max-w-[200px] truncate">{item.tags || "—"}</td>
+                      <td className="px-3 py-2">
+                        {item.status === "pending" && <span className="text-slate-400">待识别</span>}
+                        {item.status === "detecting" && <span className="text-indigo-500 animate-pulse">识别中…</span>}
+                        {item.status === "detected" && (
+                          <span className="text-emerald-600" title={item.hint}>已识别 ✓</span>
+                        )}
+                        {item.status === "importing" && <span className="text-indigo-500 animate-pulse">导入中…</span>}
+                        {item.status === "done" && <span className="text-emerald-600 font-medium">已导入 ✓</span>}
+                        {item.status === "error" && (
+                          <span className="text-red-500" title={item.hint}>失败</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card title={`小说列表（${novels.length}）`} extra={
+        <div className="flex items-center gap-2">
+          {batchDistilling && (
+            <span className="text-xs text-indigo-600">
+              蒸馏中 {batchProgress.done}/{batchProgress.total}…
+            </span>
+          )}
+          <Btn small tone="indigo"
+            disabled={batchDistilling || novels.filter((n) => n.distill_status !== "完成").length === 0}
+            onClick={batchDistill}>
+            批量蒸馏（{novels.filter((n) => n.distill_status !== "完成").length} 个未蒸馏）
+          </Btn>
+        </div>
+      }>
         <table className="w-full text-sm">
           <thead className="text-left text-slate-500 border-b">
             <tr>

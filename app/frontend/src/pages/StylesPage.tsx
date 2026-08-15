@@ -13,6 +13,9 @@ export default function StylesPage() {
   // 风格组合（§20）
   const [comboSel, setComboSel] = useState<Set<number>>(new Set());
   const [comboName, setComboName] = useState("");
+  // AI 名称建议
+  const [nameSuggestions, setNameSuggestions] = useState<string[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
 
   const load = () => {
     api.novels().then((n) => setNovels(n.filter((x) => x.distill_status === "完成")));
@@ -38,10 +41,20 @@ export default function StylesPage() {
     try {
       const p = await api.cluster(name.trim(), [...selected]);
       setMsg(`已生成风格「${p.name}」，综合稳定性 ${p.stability}%`);
-      setName(""); setSelected(new Set());
+      setName(""); setSelected(new Set()); setNameSuggestions([]);
       load();
       setActive(p);
     } catch (e) { setMsg(String(e)); }
+  };
+
+  const suggestName = async () => {
+    if (selected.size < 2) { setMsg("请先勾选至少 2 本小说"); return; }
+    setSuggesting(true); setMsg("");
+    try {
+      const r = await api.suggestStyleName([...selected]);
+      setNameSuggestions(r.suggestions);
+    } catch (e) { setMsg(String(e)); }
+    finally { setSuggesting(false); }
   };
 
   const combine = async () => {
@@ -83,11 +96,27 @@ export default function StylesPage() {
             </label>
           ))}
         </div>
-        <div className="flex gap-2 mt-4">
+        <div className="flex gap-2 mt-4 flex-wrap">
           <input placeholder="风格名称，如 男频都市商战快节奏爽文" value={name}
-            onChange={(e) => setName(e.target.value)} className="border rounded-lg px-3 py-2 text-sm flex-1" />
+            onChange={(e) => { setName(e.target.value); setNameSuggestions([]); }}
+            className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-0" />
+          <Btn tone="slate" disabled={selected.size < 2 || suggesting} onClick={suggestName}>
+            {suggesting ? "生成中…" : "AI 生成名称"}
+          </Btn>
           <Btn onClick={cluster}>生成 Style Profile（已选 {selected.size}）</Btn>
         </div>
+        {nameSuggestions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <span className="text-xs text-slate-400">AI 建议：</span>
+            {nameSuggestions.map((s) => (
+              <button key={s}
+                onClick={() => { setName(s); setNameSuggestions([]); }}
+                className="text-xs bg-indigo-100 text-indigo-700 border border-indigo-300 rounded-full px-3 py-1 hover:bg-indigo-200 transition-colors">
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
       </Card>
 
       <Card title="② 风格组合：把多个风格重新计算共同规则 / 冲突规则 / 优先级">

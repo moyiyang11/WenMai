@@ -33,6 +33,45 @@ def create_novel(payload: schemas.NovelCreate, db: Session = Depends(get_db)):
     return novel
 
 
+@router.post("/batch-upload")
+async def batch_upload(
+    files: list[UploadFile] = File(...),
+    market: str = Form("男频"),
+    genre: str = Form(""),
+    tags: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """批量上传多本 txt 小说，共用同一市场/题材/标签设置。"""
+    tag_list = [t for t in tags.split(",") if t.strip()]
+    results = []
+    for f in files:
+        stem = (f.filename or "未命名").rsplit(".", 1)[0]
+        try:
+            raw = await f.read()
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                content = raw.decode("gbk", errors="ignore")
+            novel = Novel(
+                title=stem,
+                market=market,
+                genre=genre,
+                content=content,
+                word_count=len(content),
+                chapter_count=content.count("第") // 2,
+                source="批量导入",
+            )
+            novel.tags = get_or_create_tags(db, tag_list)
+            db.add(novel)
+            db.commit()
+            db.refresh(novel)
+            results.append({"title": novel.title, "success": True, "id": novel.id})
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            results.append({"title": stem, "success": False, "error": str(exc)})
+    return {"results": results, "success_count": sum(1 for r in results if r["success"])}
+
+
 @router.post("/detect")
 async def detect_novel(
     file: UploadFile = File(...),

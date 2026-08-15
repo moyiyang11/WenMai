@@ -375,6 +375,82 @@ def detect_novel(title: str, content: str) -> dict:
     return result
 
 
+def _mock_suggest_name(summary: dict) -> list[str]:
+    market = summary.get("market", "男频")
+    genre = summary.get("genre", "")
+    tags = summary.get("style_tags", [])
+    pace = summary.get("pace", "")
+    conflict = summary.get("conflict_density", "")
+
+    pace_w = {"fast": "快节奏", "medium": "均衡节奏", "slow": "慢热沉浸"}.get(pace, "")
+    conflict_w = {"high": "高冲突", "medium": "稳步推进", "low": "轻冲突"}.get(conflict, "")
+    genre_s = genre or market
+    tag_pair = "·".join(tags[:2]) if len(tags) >= 2 else (tags[0] if tags else "")
+
+    names = []
+    n1 = f"{genre_s}{pace_w}{conflict_w}流"
+    if len(n1) >= 4:
+        names.append(n1)
+    n2 = f"{market}{genre_s}{'·'.join(tags[:2]) if tags else '爽文'}风"
+    if len(n2) >= 4 and n2 not in names:
+        names.append(n2)
+    n3 = f"{tag_pair or genre_s}{pace_w}{'爽文' if market == '男频' else '甜文'}风格"
+    if len(n3) >= 4 and n3 not in names:
+        names.append(n3)
+    return (names or [f"{market}{genre or ''}风格"])[:3]
+
+
+def suggest_profile_name(summary: dict) -> list[str]:
+    """Generate 3 style name suggestions; falls back to mock when no API key."""
+    api_key = settings_store.get_api_key()
+    if not api_key.strip():
+        return _mock_suggest_name(summary)
+
+    model = settings_store.get_model()
+    base_url = settings_store.get_base_url()
+    desc = (
+        f"市场：{summary.get('market', '男频')}，"
+        f"题材：{summary.get('genre', '')}，"
+        f"风格标签：{'/'.join(summary.get('style_tags', [])[:5])}，"
+        f"节奏：{summary.get('pace', '')}，"
+        f"冲突密度：{summary.get('conflict_density', '')}，"
+        f"主要爽点：{'/'.join(summary.get('main_payoffs', [])[:3])}"
+    )
+    user = (
+        "请根据以下风格特征，生成 3 个中文风格名称，每个名称 4~12 个字，简洁有力、体现风格核心。\n"
+        f"风格特征：{desc}\n"
+        '只输出一个 JSON 数组，如 ["名称1","名称2","名称3"]，不要额外文字。'
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "你是网文风格命名专家，擅长为小说风格取简洁有力的中文名称。"},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.7,
+        "stream": False,
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
+    with httpx.Client(timeout=30) as client:
+        resp = client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"].strip()
+    try:
+        result = json.loads(text)
+        if isinstance(result, list):
+            return [str(s) for s in result[:5]]
+    except json.JSONDecodeError:
+        m = re.search(r"\[.*?\]", text, re.DOTALL)
+        if m:
+            try:
+                result = json.loads(m.group(0))
+                if isinstance(result, list):
+                    return [str(s) for s in result[:5]]
+            except json.JSONDecodeError:
+                pass
+    return _mock_suggest_name(summary)
+
+
 def distill_novel(title: str, content: str) -> dict:
     """Distill novel into style profile dict; uses multi-segment sampling; falls back to mock."""
     api_key = settings_store.get_api_key()

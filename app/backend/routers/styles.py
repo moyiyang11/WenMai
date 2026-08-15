@@ -1,13 +1,16 @@
 """风格中心路由（说明书第 14-16 章）：聚类 -> 稳定性 -> Style Profile。"""
 from __future__ import annotations
 
+import json as _json
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 import schemas
 from core.database import get_db
 from models import Novel, StyleFeature, StyleProfile
-from services import style
+from services import llm, style
 
 router = APIRouter(prefix="/api/styles", tags=["styles"])
 
@@ -75,6 +78,55 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)):
     db.delete(profile)
     db.commit()
     return {"ok": True}
+
+
+class _SuggestNameReq(BaseModel):
+    novel_ids: list[int]
+
+
+@router.post("/suggest-name")
+def suggest_name(payload: _SuggestNameReq, db: Session = Depends(get_db)):
+    """根据已蒸馏小说特征，AI 生成 3 个推荐风格名称。"""
+    novels = db.query(Novel).filter(Novel.id.in_(payload.novel_ids)).all()
+
+    markets, genres, all_tags, paces, conflicts, payoffs = [], [], [], [], [], []
+    for n in novels:
+        if n.distillation and n.distillation.result:
+            try:
+                r = _json.loads(n.distillation.result)
+                if r.get("basic", {}).get("market"):
+                    markets.append(r["basic"]["market"])
+                if r.get("basic", {}).get("genre"):
+                    genres.append(r["basic"]["genre"])
+                all_tags.extend(r.get("style_tags", []))
+                if r.get("narrative", {}).get("pace"):
+                    paces.append(r["narrative"]["pace"])
+                if r.get("plot", {}).get("conflict_density"):
+                    conflicts.append(r["plot"]["conflict_density"])
+                payoffs.extend(r.get("emotion", {}).get("main_payoffs", []))
+            except Exception:  # noqa: BLE001
+                pass
+
+    def most_common(lst: list) -> str:
+        return max(set(lst), key=lst.count) if lst else ""
+
+    seen: set[str] = set()
+    unique_tags: list[str] = []
+    for t in all_tags:
+        if t not in seen:
+            seen.add(t)
+            unique_tags.append(t)
+
+    summary = {
+        "market": most_common(markets),
+        "genre": most_common(genres),
+        "style_tags": unique_tags[:6],
+        "pace": most_common(paces),
+        "conflict_density": most_common(conflicts),
+        "main_payoffs": list(dict.fromkeys(payoffs))[:4],
+    }
+    suggestions = llm.suggest_profile_name(summary)
+    return {"suggestions": suggestions}
 
 
 @router.post("/combine", response_model=schemas.StyleProfileOut)
