@@ -453,6 +453,8 @@ def suggest_profile_name(summary: dict) -> list[str]:
 
 def distill_novel(title: str, content: str) -> dict:
     """Distill novel into style profile dict; uses multi-segment sampling; falls back to mock."""
+    import time as _time
+
     api_key = settings_store.get_api_key()
     if not api_key.strip():
         return _mock_distill(title, content)
@@ -477,16 +479,44 @@ def distill_novel(title: str, content: str) -> dict:
         "stream": False,
     }
     headers = {"Authorization": f"Bearer {api_key}"}
-    with httpx.Client(timeout=180) as client:
-        resp = client.post(
-            f"{base_url}/chat/completions",
-            json=payload,
-            headers=headers,
-        )
-        resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"]
-    result = _extract_json(text)
-    result["_engine"] = model
-    result["_sample_desc"] = sample_desc
+
+    last_err: Exception | None = None
+    for attempt in range(2):  # 最多 2 次尝试
+        if attempt > 0:
+            _time.sleep(5)  # 限流时等 5 秒再重试
+        try:
+            with httpx.Client(timeout=180) as client:
+                resp = client.post(
+                    f"{base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                text = resp.json()["choices"][0]["message"]["content"]
+            if not text or not text.strip():
+                # API 返回空内容（限流或内容过滤），记录后重试
+                last_err = ValueError(
+                    f"LLM 返回空内容（attempt {attempt + 1}），"
+                    f"finish_reason={resp.json()['choices'][0].get('finish_reason', '?')}"
+                )
+                continue
+            result = _extract_json(text)
+            result["_engine"] = model
+            result["_sample_desc"] = sample_desc
+            return result
+        except (ValueError, json.JSONDecodeError, KeyError) as e:
+            last_err = e
+            continue
+        except httpx.HTTPStatusError as e:
+            # 429 限流 → 重试；其他状态码直接上抛
+            if e.response.status_code == 429:
+                last_err = e
+                continue
+            raise
+
+    # 两次均失败 → fallback mock，并在结果中标注原因
+    result = _mock_distill(title, content)
+    result["_engine"] = "mock(fallback)"
+    result["_fallback_reason"] = str(last_err)
     return result
 

@@ -47,6 +47,9 @@ async def batch_upload(
     for f in files:
         stem = (f.filename or "未命名").rsplit(".", 1)[0]
         try:
+            if db.query(Novel).filter(Novel.title == stem).first():
+                results.append({"title": stem, "success": False, "error": "已存在，跳过"})
+                continue
             raw = await f.read()
             try:
                 content = raw.decode("utf-8")
@@ -105,8 +108,12 @@ async def upload_novel(
     except UnicodeDecodeError:
         content = raw.decode("gbk", errors="ignore")
 
+    resolved_title = title or (file.filename or "未命名").rsplit(".", 1)[0]
+    if db.query(Novel).filter(Novel.title == resolved_title).first():
+        raise HTTPException(409, f"小说「{resolved_title}」已存在，请勿重复导入")
+
     novel = Novel(
-        title=title or (file.filename or "未命名").rsplit(".", 1)[0],
+        title=resolved_title,
         author=author,
         market=market,
         genre=genre,

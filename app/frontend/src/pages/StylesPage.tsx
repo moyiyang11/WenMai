@@ -87,12 +87,23 @@ export default function StylesPage() {
         {!novels.length && <div className="text-sm text-slate-400">暂无已蒸馏小说，请先在「小说库」蒸馏。</div>}
         <div className="grid md:grid-cols-3 gap-2">
           {novels.map((n) => (
-            <label key={n.id} className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer ${
+            <label key={n.id} className={`flex items-start gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer ${
               selected.has(n.id) ? "border-indigo-500 bg-indigo-50" : "border-slate-200"
             }`}>
-              <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} />
-              <span className="truncate">{n.title}</span>
-              <span className="text-slate-400 text-xs ml-auto">{n.genre}</span>
+              <input type="checkbox" className="mt-0.5 shrink-0" checked={selected.has(n.id)} onChange={() => toggle(n.id)} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate font-medium">{n.title}</span>
+                  {n.genre && <span className="text-slate-400 text-xs shrink-0">{n.genre}</span>}
+                </div>
+                {n.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {n.tags.map((t) => (
+                      <span key={t.id} className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-xs">{t.name}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </label>
           ))}
         </div>

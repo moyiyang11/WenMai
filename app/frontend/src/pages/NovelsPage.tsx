@@ -21,25 +21,38 @@ export default function NovelsPage() {
   const [tags, setTags] = useState("");
   const [detecting, setDetecting] = useState(false);
   const [detectHint, setDetectHint] = useState("");
+  const [dupWarning, setDupWarning] = useState("");
 
   // 批量导入
   const [batchItems, setBatchItems] = useState<{
     file: File; title: string; market: string; genre: string; tags: string;
-    status: "pending" | "detecting" | "detected" | "importing" | "done" | "error"; hint: string;
+    status: "pending" | "detecting" | "detected" | "importing" | "done" | "error" | "duplicate";
+    hint: string;
   }[]>([]);
   const [batchDetecting, setBatchDetecting] = useState(false);
   const [batchImporting, setBatchImporting] = useState(false);
 
   // 批量蒸馏
   const [batchDistilling, setBatchDistilling] = useState(false);
-  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, errors: 0 });
 
   const load = () => api.novels().then(setNovels).catch((e) => setMsg(String(e)));
   useEffect(() => { load(); }, []);
 
+  const checkDup = (stem: string) => {
+    const dup = novels.find((n) => n.title === stem);
+    setDupWarning(dup ? `「${dup.title}」已在小说库中（蒸馏状态：${dup.distill_status}）` : "");
+  };
+
   const onFileChange = (f: File | null) => {
     setFile(f);
     setDetectHint("");
+    if (f) {
+      const stem = f.name.replace(/\.txt$/i, "");
+      checkDup(title || stem);
+    } else {
+      setDupWarning("");
+    }
   };
 
   const autoDetect = async () => {
@@ -129,7 +142,7 @@ export default function NovelsPage() {
     let done = 0;
     for (let i = 0; i < batchItems.length; i++) {
       const item = batchItems[i];
-      if (item.status === "done") continue;
+      if (item.status === "done" || item.status === "duplicate") continue;
       setBatchItems((prev) => prev.map((it, idx) => idx === i ? { ...it, status: "importing", hint: "导入中…" } : it));
       const fd = new FormData();
       fd.append("file", item.file);
@@ -154,17 +167,30 @@ export default function NovelsPage() {
     const undistilled = novels.filter((n) => n.distill_status !== "完成");
     if (!undistilled.length) return;
     setBatchDistilling(true);
-    setBatchProgress({ done: 0, total: undistilled.length });
+    setBatchProgress({ done: 0, total: undistilled.length, errors: 0 });
     setMsg("");
     let done = 0;
+    let errors = 0;
+    const failedTitles: string[] = [];
     for (const n of undistilled) {
-      try { await api.distill(n.id); } catch { /* 单本失败继续 */ }
+      try {
+        await api.distill(n.id);
+      } catch (e) {
+        errors++;
+        failedTitles.push(n.title);
+      }
       done++;
-      setBatchProgress({ done, total: undistilled.length });
+      setBatchProgress({ done, total: undistilled.length, errors });
       load();
+      // 每本之间间隔 2 秒，避免触发 API 限流
+      if (done < undistilled.length) await new Promise((r) => setTimeout(r, 2000));
     }
     setBatchDistilling(false);
-    setMsg(`批量蒸馏完成（共 ${done} 本）`);
+    if (errors === 0) {
+      setMsg(`批量蒸馏完成（共 ${done} 本）`);
+    } else {
+      setMsg(`批量蒸馏完成：${done - errors} 本成功，${errors} 本失败（${failedTitles.join("、")}）。失败的已自动降级为 mock 结果，可重试。`);
+    }
   };
 
   return (
@@ -186,7 +212,13 @@ export default function NovelsPage() {
               {detectHint}
             </div>
           )}
-          <input placeholder="标题（留空取文件名）" value={title} onChange={(e) => setTitle(e.target.value)}
+          {dupWarning && (
+            <div className="md:col-span-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              ⚠ {dupWarning}，继续导入将创建同名新条目
+            </div>
+          )}
+          <input placeholder="标题（留空取文件名）" value={title}
+            onChange={(e) => { setTitle(e.target.value); checkDup(e.target.value || (file?.name.replace(/\.txt$/i, "") ?? "")); }}
             className="border rounded-lg px-3 py-2" />
           <select value={market} onChange={(e) => setMarket(e.target.value)} className="border rounded-lg px-3 py-2">
             {MARKETS.map((m) => <option key={m}>{m}</option>)}
@@ -213,12 +245,16 @@ export default function NovelsPage() {
             <input type="file" multiple accept=".txt"
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
-                setBatchItems(files.map((f) => ({
-                  file: f,
-                  title: f.name.replace(/\.txt$/i, ""),
-                  market: "男频", genre: "", tags: "",
-                  status: "pending" as const, hint: "",
-                })));
+                setBatchItems(files.map((f) => {
+                  const t = f.name.replace(/\.txt$/i, "");
+                  const dup = novels.find((n) => n.title === t);
+                  return {
+                    file: f, title: t,
+                    market: "男频", genre: "", tags: "",
+                    status: dup ? ("duplicate" as const) : ("pending" as const),
+                    hint: dup ? `已存在（${dup.distill_status}）` : "",
+                  };
+                }));
               }}
               className="border rounded-lg px-3 py-2 flex-1" />
             <Btn tone="slate"
@@ -260,6 +296,7 @@ export default function NovelsPage() {
                       <td className="px-3 py-2 text-slate-600">{item.genre || "—"}</td>
                       <td className="px-3 py-2 text-slate-500 max-w-[200px] truncate">{item.tags || "—"}</td>
                       <td className="px-3 py-2">
+                        {item.status === "duplicate" && <span className="text-amber-600" title={item.hint}>⚠ 已存在</span>}
                         {item.status === "pending" && <span className="text-slate-400">待识别</span>}
                         {item.status === "detecting" && <span className="text-indigo-500 animate-pulse">识别中…</span>}
                         {item.status === "detected" && (
@@ -284,7 +321,9 @@ export default function NovelsPage() {
         <div className="flex items-center gap-2">
           {batchDistilling && (
             <span className="text-xs text-indigo-600">
-              蒸馏中 {batchProgress.done}/{batchProgress.total}…
+              蒸馏中 {batchProgress.done}/{batchProgress.total}
+              {batchProgress.errors > 0 && <span className="text-red-500">（{batchProgress.errors} 失败）</span>}
+              …
             </span>
           )}
           <Btn small tone="indigo"
