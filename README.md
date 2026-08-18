@@ -194,3 +194,4 @@ style-skill/
 - git 仅跟踪 45 个源码/配置文件；`.venv/`、`node_modules/`、`app/backend/data/`（含 `app.db`）、`.env`、素材库 txt 均已被正确忽略。
 - 全量扫描跟踪文件，未发现真实 API Key、token、密码、邮箱、手机号、真实姓名或本机绝对路径。
 - API Key 仅落库于已忽略的 `data/app.db`，接口回显一律脱敏，符合设计预期。
+
